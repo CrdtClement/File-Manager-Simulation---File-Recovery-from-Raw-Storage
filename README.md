@@ -20,8 +20,8 @@ When a file is deleted on most operating systems, only its metadata (the pointer
 
 The work is split into two complementary parts:
 
-- **Clément's part**  — design and implementation of a **simulated storage system** in C with an SQLite backend, acting as a virtual file system, and a **file carving** algorithm to recover files from the raw hex dump
-- **William's part**  — testing recovery on **real storage devices** and benchmarking against professional tools
+- **Clément's part**  — design and implementation of a **simulated storage system** in C with an SQLite backend, acting as a virtual file system
+- **William's part**  — implementation of a **file carving** algorithm to recover files from the raw hex dump and testing recovery on **real storage devices**
 
 ---
 
@@ -42,15 +42,13 @@ The work is split into two complementary parts:
 
 ---
 
-## Clément's part
-
-### Part 1 — Storage system simulator (`storage_sim.c`)
+## Clément's part — Storage system simulator (`storage_sim.c`)
 
 This program simulates a minimal file system from scratch. Files are stored as a flat hexadecimal dump (`hexadecimal_file.txt`) alongside an SQLite database (`file_manager.db`) that holds the metadata table — mimicking the separation between raw data blocks and the file allocation table found on real drives.
 
 **Simulating deletion** means simply dropping the file's row from the SQL table. The hex data remains untouched in the flat file, exactly as it would on a real disk. The carving algorithm (`recovery_files.c`) can then be run on that raw file without any database access.
 
-#### Data model
+### Data model
 
 Each file is stored in the SQLite table `files` with the following fields:
 
@@ -63,7 +61,7 @@ Each file is stored in the SQLite table `files` with the following fields:
 
 The `address` field encodes both where the file starts in the hex dump (`offset`) and how many bytes it occupies (`length`), separated by a colon — a deliberate design choice to keep the schema minimal.
 
-#### Available operations
+### Available operations
 
 The program exposes an interactive terminal menu:
 
@@ -77,7 +75,7 @@ The program exposes an interactive terminal menu:
 | 6 | `delete_file` | Remove DB entry, compact the hex dump, update all offsets |
 | 7 | — | Quit |
 
-#### Key implementation details
+### Key implementation details
 
 **Adding a file** (`add_file`): the binary file is read byte by byte, each byte written as two hex characters appended to `hexadecimal_file.txt`. The file position before writing gives the offset; the byte count gives the length. Both are stored in the DB as `offset:length`. The original file is then deleted from disk.
 
@@ -87,7 +85,7 @@ The program exposes an interactive terminal menu:
 
 **SQL injection mitigation**: the interface uses `snprintf`-built queries with raw user input — a known limitation identified during testing with `DROP TABLE` inputs. Parameterised queries (`sqlite3_bind_*`) would be the correct fix.
 
-#### Build & run
+### Build & run
 
 ```bash
 gcc -o storage_sim src/storage_sim.c -lsqlite3
@@ -103,11 +101,11 @@ sudo apt install libsqlite3-dev
 
 ---
 
-### Part 2 — File carving algorithm (`recovery_files.c`)
+## William's part — File carving algorithm (`recovery_files.c`)
 
 This program takes `hexadecimal_file.txt` as input — typically produced after the database has been deleted — and attempts to reconstruct all files it can find by scanning for known file signatures.
 
-#### How it works
+### How it works
 
 The algorithm scans the hex dump sequentially, byte by byte. When it finds a sequence matching a known **header signature**, it enters "inside file" mode and accumulates bytes until it finds the matching **footer signature**. The extracted block is then written to disk as a recovered file.
 
@@ -118,7 +116,7 @@ The algorithm scans the hex dump sequentially, byte by byte. When it finds a seq
 
 File types are defined as an `Extension` struct holding the format name, header bytes, footer bytes, and their respective sizes — making it straightforward to add new formats.
 
-#### Build & run
+### Build & run
 
 ```bash
 gcc -o recovery_files src/recovery_files.c
@@ -129,19 +127,11 @@ The program reads `hexadecimal_file.txt` from the current directory and writes r
 
 To add a new file format, declare its header and footer byte arrays and pass a new `Extension` to `extract_file()` in `main()`.
 
-#### Known limitations
+### Known limitations
 
 - **Fragmented files** are not handled — the algorithm assumes contiguous storage
 - **Video formats (MOV)** were abandoned early due to variable and truncated signatures
 - **Text files** were attempted but proved unreliable due to ambiguous signatures (`0x00` / `0x0A`)
-
----
-
-## William's part
-
-William's part focuses on running file carving on **real storage devices** (USB drives, hard disks with deleted partitions) and benchmarking recovery rates, speed, and accuracy against professional tools such as TestDisk, Recuva, and Photorec.
-
-His code and results will be available in his own repository — link to be added here.
 
 ---
 
